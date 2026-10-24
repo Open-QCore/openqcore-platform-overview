@@ -1,8 +1,8 @@
 # Enterprise AI Knowledge Assistant
-## Solution Architecture Case Study
+## Reference Architecture
 
 **Document type:** Reference architecture and proposed solution design  
-**Status:** Conceptual design — not a production deployment
+**Status:** Conceptual design, not a production deployment. Section 9 states which parts exist in a platform I built and which do not.
 
 ## 1. Business Problem
 
@@ -32,8 +32,8 @@ flowchart TD
     API[Authenticated API Layer]
     ORCH[AI Orchestration Service]
     RET[Permission-Aware Retrieval]
-    IDX[(Search Index and Document Metadata)]
-    ING[Document Ingestion Pipeline]
+    IDX[(Search Index, Metadata and Access Lists)]
+    ING[Ingestion and Access Sync Pipeline]
     SRC[Approved Knowledge Sources]
     LLM[Approved Language Model]
     OBS[Monitoring and Audit]
@@ -62,12 +62,11 @@ This diagram represents a conceptual design. Specific infrastructure and service
 
 1. Authenticate the user and establish their identity and access context.
 2. Validate the request and apply applicable input and usage controls.
-3. Search approved knowledge sources using semantic and keyword retrieval.
-4. Enforce document-level permissions before including content in the model context.
-5. Rank and select relevant passages.
-6. Generate an answer grounded in the selected evidence.
-7. Return the response with source references where available.
-8. Record operational metrics and audit events without unnecessarily storing sensitive prompt content.
+3. Search approved knowledge sources using semantic and keyword retrieval, with the user's access context applied as a filter inside the query.
+4. Rank and select relevant passages from the already-permitted results.
+5. Generate an answer grounded in the selected evidence.
+6. Return the response with source references where available.
+7. Record operational metrics and audit events without unnecessarily storing sensitive prompt content.
 
 The retrieval and generation stages should fail safely when required access checks or supporting services are unavailable.
 
@@ -88,6 +87,12 @@ The final choice should follow requirements discovery, a proof of concept, and a
 Hybrid retrieval combines semantic similarity with keyword matching. It can help balance conceptual relevance with exact matches for identifiers, product codes, and technical terminology.
 
 Ranking methods should be evaluated against representative enterprise questions rather than assumed to be effective without testing.
+
+### Access control in retrieval
+
+Permissions should be applied as a **pre-filter at query time**, so unauthorised documents never enter candidate ranking. Filtering results after ranking can leak information indirectly, for example through result counts, score distributions, or timing.
+
+Access lists must stay **synchronised with the source systems**. When a permission changes or a document is deleted at the source, the change has to reach the index within a defined time window. Stale access lists are one of the most common failure modes of enterprise retrieval systems, so the ingestion pipeline treats permission and deletion events as first-class updates, not only content changes.
 
 ### Provider abstraction
 
@@ -119,7 +124,7 @@ The solution should monitor:
 - Retrieval relevance and source coverage
 - Unsupported or insufficiently grounded answers
 - Access-control failures and unexpected data exposure
-- Service availability and ingestion freshness
+- Service availability and ingestion freshness, including permission-sync lag
 
 Potential controls include bounded retries, timeouts, provider circuit breakers, caching where appropriate, model-routing policies, and usage quotas.
 
@@ -141,24 +146,41 @@ Measure:
 
 Establish a baseline before optimisation. Set acceptance thresholds with business and technical stakeholders, and report measured results separately from proposed targets.
 
-## 9. Delivery Approach
+## 9. How This Maps to What I Have Built
 
-**Phase 1 — Discovery:** Confirm users, data sources, access rules, compliance constraints, and success criteria.
+This reference design draws on OpenQCore, an AI platform I architected and built. The parts below exist in OpenQCore today. The gaps are listed after the table.
 
-**Phase 2 — Proof of concept:** Implement a limited ingestion and retrieval workflow using approved, non-sensitive sample content.
+| Requirement | In OpenQCore |
+|---|---|
+| Model and retrieval evolve independently | Provider registry behind one interface (OpenAI, Anthropic, Gemini), with native tool calling |
+| Provider outages | Automatic fallback to a lower-cost default model before an error reaches the user |
+| Control usage and cost | Per-user and per-workspace wallets, reserve-then-settle accounting, token-based pricing, usage tiers, graceful downgrade |
+| Knowledge sources | Workspace knowledge bases with chunking and embedding pipelines, linked to agents |
+| Identity and access | JWT, OAuth2 (Google, Microsoft), TOTP MFA, hashed API keys |
+| Monitoring | OpenTelemetry, Prometheus, Loki, Tempo, Alertmanager with alert rules as code |
+| Latency | Measured and reduced from 7.9 s to 3.0 s time-to-first-token |
 
-**Phase 3 — Evaluation:** Test retrieval quality, answer grounding, security boundaries, and cost assumptions.
+**Not built yet:** document-level access control synchronised from enterprise sources, enterprise identity federation (SAML or OIDC with an enterprise directory), and a formal retrieval evaluation harness. These are the first items I would scope in a discovery phase.
 
-**Phase 4 — Pilot:** Integrate identity, monitoring, feedback collection, and operational controls.
+## 10. Delivery Approach
 
-**Phase 5 — Production readiness:** Validate resilience, performance, governance, incident response, and ongoing ownership.
+**Phase 1, Discovery:** Confirm users, data sources, access rules, compliance constraints, and success criteria.
 
-## 10. Key Risks
+**Phase 2, Proof of concept:** Implement a limited ingestion and retrieval workflow using approved, non-sensitive sample content.
+
+**Phase 3, Evaluation:** Test retrieval quality, answer grounding, security boundaries, and cost assumptions.
+
+**Phase 4, Pilot:** Integrate identity, monitoring, feedback collection, and operational controls.
+
+**Phase 5, Production readiness:** Validate resilience, performance, governance, incident response, and ongoing ownership.
+
+## 11. Key Risks
 
 | Risk | Mitigation |
 |---|---|
 | Incorrect or unsupported answers | Evidence-based evaluation, source references, and safe escalation |
-| Exposure of unauthorised documents | Identity-aware retrieval and access-control testing |
+| Exposure of unauthorised documents | Identity-aware pre-filtered retrieval and access-control testing |
+| Stale permissions or deleted documents still retrievable | Permission and deletion events synchronised to the index, with freshness monitoring |
 | Prompt injection in retrieved content | Treat retrieved text as untrusted data and enforce policy outside model instructions |
 | Uncontrolled model spend | Usage budgets, quotas, monitoring, and routing policies |
 | Provider outages | Timeouts, bounded retries, fallback policies, and graceful degradation |
@@ -166,6 +188,6 @@ Establish a baseline before optimisation. Set acceptance thresholds with busines
 
 ## Scope and Limitations
 
-This is a proposed reference architecture, not evidence of a deployed enterprise solution or tested production performance. Technology selections, service-level objectives, compliance requirements, and cost estimates must be validated against the actual environment.
+This is a proposed reference architecture, not evidence of a deployed enterprise solution or tested production performance. Section 9 describes components of a separate platform and does not claim an enterprise deployment of this design. Technology selections, service-level objectives, compliance requirements, and cost estimates must be validated against the actual environment.
 
 The design intentionally excludes private source code, credentials, customer data, and internal production configuration.
